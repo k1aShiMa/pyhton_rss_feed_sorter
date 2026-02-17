@@ -22,7 +22,6 @@ n8n: Workflow automation and message routing.
 
 Discord: Final delivery platform for the alerts.
 
-.
 ├── Dockerfile              # Container build instructions
 ├── requirements.txt        # Python dependencies (feedparser, requests)
 ├── rss_sorter.py           # Main logic & Filtering engine
@@ -81,3 +80,4 @@ Update COMPANY_STACK as new hardware/software is onboarded.
 Add new RSS sources to the FEEDS list.
 
 Improve regex patterns for better CVSS extraction.
+
