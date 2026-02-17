@@ -1,90 +1,106 @@
-import tkinter as tk
-from tkinter import ttk, scrolledtext
-from datetime import datetime, timedelta
 import feedparser
-import re  # Added for searching CVE and CVSS patterns
+import re
+import requests
+import json
+from datetime import datetime, timezone, timedelta
 
-# RSS Feed URL (NVD or specialized security feeds work best for this)
-FEED_URL = "https://feeds.feedburner.com/TheHackersNews" 
+# --- Company STACK & config ---
+# keywords for your company's stack and infra y'know like a whitelist
+# AND ALSO you can modify this list, so if your environment isn't contains like nginx or something you can just delete that lol
+COMPANY_STACK = [
+    "fortinet", "fortios", "forticlient", "fortigate",
+    "cisco", "ise", "catalyst", "rv340", 
+    "windows server", "active directory", "exchange",
+    "vmware", "esxi", "vcenter",
+    "f5", "big-ip",
+    "apache", "log4j", "nginx", "elastic",
+    "kibana", "chrome", "signal", "redhat",
+    "grafana", "slack", "atlassian",
+    "bamboo", "jira", "moodle",
+    "zabbix", "vscode", "notepad++",
+    "docker", "trend micro", "wireshark",
+    "men & mice", "men and mice", "n8n",
+    ""
+    ]
+
+# blacklisted words
+EXCLUDE_KEYWORDS = ["android", "iphone", "macos"]
+
+# Minimum CVSS score lol
+MIN_CVSS = 0.0
+
+N8N_WEBHOOK_URL = "http://localhost:5678/webhook-test/JPJbTokeegroikd2"
+
+# You can modify the FEEDS list, cuz why not
+FEEDS = [
+    "https://feeds.feedburner.com/TheHackersNews", #thehackernews
+    "https://www.bleepingcomputer.com/feed/", #bleepingcomputer
+    "https://filestore.fortinet.com/fortiguard/rss/ir.xml", #fortinet psirt
+    "https://sec.cloudapps.cisco.com/security/center/psirtrss20/CiscoSecurityAdvisory.xml", #Cisco
+    "https://www.cisa.gov/cybersecurity-advisories/ics-advisories.xml", # CISA
+    "https://wid.cert-bund.de/content/public/securityAdvisory/rss" #wid-cert-bund = german rss feed
+    #"C:\path\to-the\rss-file" #rss feed from a file
+]
 
 def extract_security_info(text):
-    """Searches text for CVE IDs and CVSS scores using regex."""
-    # Pattern for CVE (e.g., CVE-2023-1234)
     cve_pattern = r'CVE-\d{4}-\d{4,7}'
-    # Pattern for CVSS (looks for 'CVSS' followed by a number like 9.8 or 7.0)
     cvss_pattern = r'CVSS[:\s]*(\d{1,2}\.\d)'
-    
-    cves = re.findall(cve_pattern, text)
+    cves = list(set(re.findall(cve_pattern, text, re.IGNORECASE)))
     cvss_match = re.search(cvss_pattern, text, re.IGNORECASE)
     
-    found_cve = ", ".join(set(cves)) if cves else "None Found"
-    found_cvss = cvss_match.group(1) if cvss_match else "N/A"
+    score = float(cvss_match.group(1)) if cvss_match else 0.0
+    return (cves if cves else ["None Found"]), score
+
+def is_relevant(title, summary):
+    content = (title + " " + summary).lower()
     
-    return found_cve, found_cvss
+    # 1. Checking if it's in the blacklist
+    if any(ex in content for ex in EXCLUDE_KEYWORDS):
+        return False
+        
+    # 2. Checking if it's in the whitelist
+    if any(tech in content for tech in COMPANY_STACK):
+        return True
+        
+    return False
 
-# GUI Setup
-window = tk.Tk()
-window.title("Security RSS Feed Viewer")
-window.geometry("1280x720")
+def fetch_and_alert():
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=24)
+    print(f"[*] Starting targeted scan for company stack...")
 
-# Input area for time and keywords
-top_frame = tk.Frame(window)
-top_frame.pack(pady=10)
+    for url in FEEDS:
+        feed = feedparser.parse(url)
+        for entry in feed.entries:
+            if hasattr(entry, 'published_parsed'):
+                entry_time = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                if entry_time < cutoff:
+                    continue
 
-time_input = tk.StringVar(value="24")
-ttk.Label(top_frame, text="Hours:").grid(row=0, column=0, padx=5)
-ttk.Entry(top_frame, textvariable=time_input, width=5).grid(row=0, column=1, padx=5)
-
-keyword_input = tk.StringVar(value="fortinet, cisco, exploit")
-ttk.Label(top_frame, text="Keywords:").grid(row=0, column=2, padx=5)
-ttk.Entry(top_frame, textvariable=keyword_input, width=30).grid(row=0, column=3, padx=5)
-
-# Text Display Area
-text_area = scrolledtext.ScrolledText(window, wrap=tk.WORD)
-text_area.pack(expand=True, fill='both', padx=10, pady=10)
-text_area.configure(font=("Consolas", 11))
-text_area.tag_config("title", foreground="blue", font=("Consolas", 12, "bold"))
-text_area.tag_config("alert", foreground="red", font=("Consolas", 11, "bold"))
-
-def fetch_feed():
-    text_area.delete(1.0, tk.END)
-
-    try:
-        hours = int(time_input.get())
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
-    except ValueError:
-        text_area.insert(tk.END, "Error: Invalid hour count.\n")
-        return
-
-    keywords = [kw.strip().lower() for kw in keyword_input.get().split(",") if kw.strip()]
-    feed = feedparser.parse(FEED_URL)
-    
-    if not feed.entries:
-        text_area.insert(tk.END, "No entries found.\n")
-        return
-
-    for entry in feed.entries:
-        # Check time
-        if hasattr(entry, 'published_parsed'):
-            entry_time = datetime(*entry.published_parsed[:6])
-            if entry_time > cutoff:
+            summary = entry.get('summary', '')
+            
+            # --- Filtering logic ---
+            if is_relevant(entry.title, summary):
+                cve_ids, cvss_score = extract_security_info(entry.title + " " + summary)
                 
-                # Search title AND summary for keywords
-                summary = entry.get('summary', '')
-                content = (entry.title + " " + summary).lower()
-                
-                if not keywords or any(kw in content for kw in keywords):
-                    # Extract CVE and CVSS
-                    cve_id, cvss_score = extract_security_info(entry.title + " " + summary)
-                    
-                    # Formatting output
-                    text_area.insert(tk.END, f"TITLE: {entry.title}\n", "title")
-                    text_area.insert(tk.END, f"DATE:  {entry.published}\n")
-                    text_area.insert(tk.END, f"CVE:   {cve_id}\n", "alert" if cve_id != "None Found" else "")
-                    text_area.insert(tk.END, f"CVSS:  {cvss_score}\n", "alert" if cvss_score != "N/A" else "")
-                    text_area.insert(tk.END, f"LINK:  {entry.link}\n")
-                    text_area.insert(tk.END, "-"*80 + "\n\n")
+                # Filtering for CVSS score
+                if cvss_score < MIN_CVSS and cvss_score != 0.0:
+                    continue
 
-ttk.Button(window, text="Fetch Security Feed", command=fetch_feed).pack(pady=5)
+                payload = {
+                    "alert_type": "MATCHED_STACK",
+                    "title": entry.title,
+                    "cve": cve_ids,
+                    "cvss": cvss_score if cvss_score > 0 else "N/A",
+                    "link": entry.link,
+                    "urgency": "CRITICAL" if cvss_score >= 9.0 else "HIGH" if cvss_score >= 7.0 else "INFO"
+                }
 
-window.mainloop()
+                try:
+                    requests.post(N8N_WEBHOOK_URL, json=payload)
+                    print(f"[+] Alert sent for: {entry.title}")
+                except Exception as e:
+                    print(f"[!] Error: {e}")
+
+if __name__ == "__main__":
+    fetch_and_alert()
