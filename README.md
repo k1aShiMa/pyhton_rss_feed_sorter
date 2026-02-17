@@ -23,8 +23,11 @@ n8n: Workflow automation and message routing.
 Discord: Final delivery platform for the alerts.
 
 ├── Dockerfile              # Container build instructions
+
 ├── requirements.txt        # Python dependencies (feedparser, requests)
+
 ├── rss_sorter.py           # Main logic & Filtering engine
+
 └── README.md               # Documentation
 
 
