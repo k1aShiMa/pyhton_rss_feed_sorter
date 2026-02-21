@@ -2,12 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Másoljuk a függőségeket és telepítjük
+#Copy and install
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Másoljuk a scriptet (Figyelj, hogy a fájlneved pontos legyen!)
+# copy the file
 COPY rss_sorter.py .
 
-# Amikor elindul a konténer, lefut a script
+# When the container is running it's just launches the script xd
 CMD ["python", "rss_sorter.py"]
